@@ -3,28 +3,30 @@ package configuration
 import (
 	"encoding/json"
 	"io/ioutil"
+	"path/filepath"
+	"strings"
 
-	"github.com/go-akka/configuration/hocon"
+	"github.com/vipinmakode/configuration/hocon"
 )
 
-func ParseString(text string, includeCallback ...hocon.IncludeCallback) *Config {
+func ParseString(text, baseDir string, includeCallback ...hocon.IncludeCallback) *Config {
 	var callback hocon.IncludeCallback
 	if len(includeCallback) > 0 {
 		callback = includeCallback[0]
 	} else {
 		callback = defaultIncludeCallback
 	}
-	root := hocon.Parse(text, callback)
+	root := hocon.Parse(text, baseDir, callback)
 	return NewConfigFromRoot(root)
 }
 
 func LoadConfig(filename string) *Config {
-	data, err := ioutil.ReadFile(filename)
+	data, baseDir, err := readFile(filename)
 	if err != nil {
 		panic(err)
 	}
 
-	return ParseString(string(data), defaultIncludeCallback)
+	return ParseString(string(data), baseDir, defaultIncludeCallback)
 }
 
 func FromObject(obj interface{}) *Config {
@@ -33,14 +35,27 @@ func FromObject(obj interface{}) *Config {
 		panic(err)
 	}
 
-	return ParseString(string(data), defaultIncludeCallback)
+	return ParseString(string(data), "", defaultIncludeCallback)
 }
 
 func defaultIncludeCallback(filename string) *hocon.HoconRoot {
-	data, err := ioutil.ReadFile(filename)
+	data, baseDir, err := readFile(filename)
 	if err != nil {
-		panic(err)
+		// Ignore the missing included file
+		return hocon.Parse("", "", defaultIncludeCallback)
 	}
 
-	return hocon.Parse(string(data), defaultIncludeCallback)
+	return hocon.Parse(string(data), baseDir, defaultIncludeCallback)
+}
+
+func readFile(filename string) (string, string, error) {
+	if strings.HasPrefix(filename, "http://") || strings.HasPrefix(filename, "https://") || strings.HasPrefix(filename, "file://") {
+		panic("url is not yet supported.")
+	} else {
+		data, err := ioutil.ReadFile(filename)
+		if err != nil {
+			return "", "", err
+		}
+		return string(data), filepath.Dir(filename), err
+	}
 }
