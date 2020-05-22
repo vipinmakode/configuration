@@ -1,7 +1,9 @@
 package hocon
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -15,16 +17,16 @@ type Parser struct {
 	substitutions []*HoconSubstitution
 }
 
-func Parse(text string, callback IncludeCallback) *HoconRoot {
-	return new(Parser).parseText(text, callback)
+func Parse(text, baseDir string, callback IncludeCallback) *HoconRoot {
+	return new(Parser).parseText(text, baseDir, callback)
 }
 
-func (p *Parser) parseText(text string, callback IncludeCallback) *HoconRoot {
+func (p *Parser) parseText(text, baseDir string, callback IncludeCallback) *HoconRoot {
 	p.callback = callback
 	p.root = NewHoconValue()
 	p.reader = NewHoconTokenizer(text)
 	p.reader.PullWhitespaceAndComments()
-	p.parseObject(p.root, true, "")
+	p.parseObject(p.root, true, "", baseDir)
 
 	root := NewHoconRoot(p.root)
 
@@ -51,7 +53,18 @@ func (p *Parser) parseText(text string, callback IncludeCallback) *HoconRoot {
 	return NewHoconRoot(p.root, p.substitutions...)
 }
 
-func (p *Parser) parseObject(owner *HoconValue, root bool, currentPath string) {
+func includeFilePath(fileName, baseDir string) string {
+	if strings.HasPrefix(fileName, "http://") || strings.HasPrefix(fileName, "https://") || strings.HasPrefix(fileName, "file://") {
+		return fileName
+	}
+	if baseDir != "" && filepath.Dir(fileName) == "." {
+		return fmt.Sprintf("%s/%s", baseDir, fileName)
+	} else {
+		return fileName
+	}
+}
+
+func (p *Parser) parseObject(owner *HoconValue, root bool, currentPath, baseDir string) {
 	if !owner.IsObject() {
 		owner.NewValue(NewHoconObject())
 	}
@@ -77,7 +90,7 @@ func (p *Parser) parseObject(owner *HoconValue, root bool, currentPath string) {
 
 		switch t.tokenType {
 		case TokenTypeInclude:
-			included := p.callback(t.value)
+			included := p.callback(includeFilePath(t.value, baseDir))
 			substitutions := included.substitutions
 			for _, substitution := range substitutions {
 				substitution.Path = currentPath + "." + substitution.Path
@@ -107,7 +120,7 @@ func (p *Parser) parseKeyContent(value *HoconValue, currentPath string) {
 		t := p.reader.PullNext()
 		switch t.tokenType {
 		case TokenTypeDot:
-			p.parseObject(value, false, currentPath)
+			p.parseObject(value, false, currentPath, "")
 			return
 		case TokenTypeAssign:
 			{
@@ -126,7 +139,7 @@ func (p *Parser) parseKeyContent(value *HoconValue, currentPath string) {
 			p.ParseValue(value, true, currentPath)
 			return
 		case TokenTypeObjectStart:
-			p.parseObject(value, true, currentPath)
+			p.parseObject(value, true, currentPath, "")
 			return
 		}
 	}
@@ -156,7 +169,7 @@ func (p *Parser) ParseValue(owner *HoconValue, isEqualPlus bool, currentPath str
 			lit := NewHoconLiteral(t.value)
 			owner.AppendValue(lit)
 		case TokenTypeObjectStart:
-			p.parseObject(owner, true, currentPath)
+			p.parseObject(owner, true, currentPath, "")
 		case TokenTypeArrayStart:
 			arr := p.ParseArray(currentPath)
 			owner.AppendValue(&arr)
